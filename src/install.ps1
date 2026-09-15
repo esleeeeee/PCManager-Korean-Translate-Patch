@@ -47,6 +47,7 @@ try {
         Show-Failure "MSPCManager.exe was not found in the Microsoft Store package."
     }
 
+    # Stop an existing installed agent if present.
     try {
         $OldPid = (Get-ItemProperty -LiteralPath $ConfigKey -Name "AgentPid" -ErrorAction SilentlyContinue).AgentPid
 
@@ -62,14 +63,18 @@ try {
 
     Start-Sleep -Milliseconds 250
 
+    # Remove older startup registrations from previous builds.
     Remove-ItemProperty -Path $RunKey -Name "PCManagerKoPatch" -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path $RunKey -Name "PCManagerKoPatchAgent" -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $StartupLauncher -Force -ErrorAction SilentlyContinue
     Remove-Item "$env:LOCALAPPDATA\PCManagerKoPatch.ps1" -Force -ErrorAction SilentlyContinue
 
     New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
+
+    # Install the transparent source agent.
     Copy-Item -LiteralPath $AgentSource -Destination $AgentPath -Force
 
+    # Hidden launcher used at sign-in.
     $Launcher = @'
 Set sh = CreateObject("WScript.Shell")
 ps = sh.ExpandEnvironmentStrings("%LOCALAPPDATA%\PCManagerKoPatch\agent.ps1")
@@ -85,6 +90,7 @@ sh.Run cmd, 0, False
 
     Copy-Item -LiteralPath $LauncherPath -Destination $StartupLauncher -Force
 
+    # Preserve any previous app-specific WebView2 arguments for clean uninstall.
     New-Item -Path $ConfigKey -Force | Out-Null
     New-Item -Path $WebViewKey -Force | Out-Null
 
@@ -127,6 +133,7 @@ sh.Run cmd, 0, False
         -Value $Arguments `
         -Force | Out-Null
 
+    # Register two user-level startup paths for reliability.
     $RunCommand = 'wscript.exe "' + $LauncherPath + '"'
 
     New-Item -Path $RunKey -Force | Out-Null
@@ -141,6 +148,7 @@ sh.Run cmd, 0, False
     New-ItemProperty -Path $ConfigKey -Name "InstallRoot" -PropertyType String -Value $InstallRoot -Force | Out-Null
     Remove-ItemProperty -Path $ConfigKey -Name "AgentPid" -ErrorAction SilentlyContinue
 
+    # Start the background agent now.
     Start-Process `
         -FilePath "wscript.exe" `
         -ArgumentList "`"$LauncherPath`"" `
@@ -148,6 +156,7 @@ sh.Run cmd, 0, False
 
     Start-Sleep -Milliseconds 700
 
+    # Restart PC Manager so the WebView2 argument policy takes effect.
     Stop-Process -Name "MSPCManager" -Force -ErrorAction SilentlyContinue
     Stop-Process -Name "MSPCManagerCore" -Force -ErrorAction SilentlyContinue
 
@@ -160,6 +169,7 @@ sh.Run cmd, 0, False
     Start-Sleep -Milliseconds 800
     Start-Process $PcManagerExe
 
+    # Verify both components without throwing noisy PowerShell errors.
     $AgentOk = $false
     $EndpointOk = $false
 
