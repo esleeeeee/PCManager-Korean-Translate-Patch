@@ -40,6 +40,7 @@ try {
     Remove-ItemProperty -Path $RunKey -Name "PCManagerKoPatchAgent" -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $StartupLauncher -Force -ErrorAction SilentlyContinue
 
+    # Restore the app-specific WebView2 arguments that existed before installation.
     $HadPreviousArguments = $false
     $PreviousArguments = ""
 
