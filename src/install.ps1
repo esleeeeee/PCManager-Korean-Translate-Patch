@@ -1,6 +1,31 @@
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
+function Assert-WebViewPolicyWritable {
+    # Check the closest existing parent without creating keys or changing ACLs.
+    # Some PCs protect HKCU\Software\Policies even for the current user.
+    $RelativePath = 'Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
+    while ($RelativePath) {
+        $ReadKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($RelativePath)
+        if ($null -ne $ReadKey) {
+            $ReadKey.Dispose()
+            try {
+                $WriteKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($RelativePath, $true)
+                if ($null -eq $WriteKey) { throw 'Registry key could not be opened for writing.' }
+                $WriteKey.Dispose()
+                return
+            }
+            catch {
+                throw 'The WebView2 policy is read-only for this account. No installation changes were made. Right-click install.bat and choose Run as administrator using the SAME Windows account, then run diagnose.bat. If this is an organization-managed PC, ask its administrator. Existing patch files and processes have been preserved.'
+            }
+        }
+        $Separator = $RelativePath.LastIndexOf('\')
+        if ($Separator -lt 0) { break }
+        $RelativePath = $RelativePath.Substring(0, $Separator)
+    }
+    throw 'Unable to check WebView2 policy permissions. No installation changes were made.'
+}
+
 function Show-Failure {
     param([string]$Message)
 
@@ -12,6 +37,8 @@ function Show-Failure {
 }
 
 try {
+    $IsElevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
     $Port = 9222
     $InstallRoot = Join-Path $env:LOCALAPPDATA "PCManagerKoPatch"
     $AgentSource = Join-Path $PSScriptRoot "agent.ps1"
@@ -47,19 +74,23 @@ try {
         Show-Failure "MSPCManager.exe was not found in the Microsoft Store package."
     }
 
-    # Stop an existing installed agent if present.
-    try {
-        $OldPid = (Get-ItemProperty -LiteralPath $ConfigKey -Name "AgentPid" -ErrorAction SilentlyContinue).AgentPid
+    # Fail before stopping the working agent or replacing startup registrations.
+    Assert-WebViewPolicyWritable
 
-        if ($OldPid) {
-            $OldProcess = Get-Process -Id $OldPid -ErrorAction SilentlyContinue
-
-            if ($OldProcess -and $OldProcess.ProcessName -ieq "powershell") {
-                Stop-Process -Id $OldPid -Force -ErrorAction SilentlyContinue
+    # An elevated setup only installs configuration. Runtime processes must stay
+    # at normal user integrity: elevated WebView2 ignores these local flags.
+    if (-not $IsElevated) {
+        try {
+            $OldPid = (Get-ItemProperty -LiteralPath $ConfigKey -Name "AgentPid" -ErrorAction SilentlyContinue).AgentPid
+            if ($OldPid) {
+                $OldProcess = Get-Process -Id $OldPid -ErrorAction SilentlyContinue
+                if ($OldProcess -and $OldProcess.ProcessName -ieq "powershell") {
+                    Stop-Process -Id $OldPid -Force -ErrorAction SilentlyContinue
+                }
             }
         }
+        catch {}
     }
-    catch {}
 
     Start-Sleep -Milliseconds 250
 
@@ -91,8 +122,8 @@ sh.Run cmd, 0, False
     Copy-Item -LiteralPath $LauncherPath -Destination $StartupLauncher -Force
 
     # Preserve any previous app-specific WebView2 arguments for clean uninstall.
-    New-Item -Path $ConfigKey -Force | Out-Null
-    New-Item -Path $WebViewKey -Force | Out-Null
+    if (-not (Test-Path -LiteralPath $ConfigKey)) { New-Item -Path $ConfigKey -Force | Out-Null }
+    if (-not (Test-Path -LiteralPath $WebViewKey)) { New-Item -Path $WebViewKey -Force | Out-Null }
 
     $HadPreviousArguments = $false
     $PreviousArguments = ""
@@ -107,19 +138,24 @@ sh.Run cmd, 0, False
     }
     catch {}
 
-    New-ItemProperty `
-        -Path $ConfigKey `
-        -Name "HadPreviousBrowserArguments" `
-        -PropertyType DWord `
-        -Value ([int]$HadPreviousArguments) `
-        -Force | Out-Null
+    # A repair install must retain the original uninstall backup, not replace it
+    # with the debugging arguments from an earlier installation.
+    $SavedConfig = Get-ItemProperty -LiteralPath $ConfigKey
+    if ($SavedConfig.PSObject.Properties.Name -notcontains 'HadPreviousBrowserArguments') {
+        New-ItemProperty `
+            -Path $ConfigKey `
+            -Name "HadPreviousBrowserArguments" `
+            -PropertyType DWord `
+            -Value ([int]$HadPreviousArguments) `
+            -Force | Out-Null
 
-    New-ItemProperty `
-        -Path $ConfigKey `
-        -Name "PreviousBrowserArguments" `
-        -PropertyType String `
-        -Value ([string]$PreviousArguments) `
-        -Force | Out-Null
+        New-ItemProperty `
+            -Path $ConfigKey `
+            -Name "PreviousBrowserArguments" `
+            -PropertyType String `
+            -Value ([string]$PreviousArguments) `
+            -Force | Out-Null
+    }
 
     $Arguments = [string]$PreviousArguments
     $Arguments = [regex]::Replace($Arguments, '(?i)--remote-debugging-port(?:=|\s+)\d+', '')
@@ -136,7 +172,7 @@ sh.Run cmd, 0, False
     # Register two user-level startup paths for reliability.
     $RunCommand = 'wscript.exe "' + $LauncherPath + '"'
 
-    New-Item -Path $RunKey -Force | Out-Null
+    if (-not (Test-Path -LiteralPath $RunKey)) { New-Item -Path $RunKey -Force | Out-Null }
     New-ItemProperty `
         -Path $RunKey `
         -Name "PCManagerKoPatchAgent" `
@@ -146,6 +182,17 @@ sh.Run cmd, 0, False
 
     New-ItemProperty -Path $ConfigKey -Name "InstallVersion" -PropertyType String -Value "1.0.0" -Force | Out-Null
     New-ItemProperty -Path $ConfigKey -Name "InstallRoot" -PropertyType String -Value $InstallRoot -Force | Out-Null
+    if ($IsElevated) {
+        Write-Host ""
+        Write-Host "SETUP SAVED - NORMAL RESTART REQUIRED" -ForegroundColor Yellow
+        Write-Host "PC Manager has NOT been launched with administrator rights."
+        Write-Host "Close this installer, exit PC Manager from its tray menu, then reopen it normally."
+        Write-Host "From File Explorer, double-click: $LauncherPath"
+        Write-Host "Alternatively, sign out of Windows and sign back in to start both normally."
+        Write-Host "Then run diagnose.bat and test Ctrl+Shift+A translation."
+        Write-Host "Runtime connection and Korean translation have NOT yet been verified."
+        exit 2
+    }
     Remove-ItemProperty -Path $ConfigKey -Name "AgentPid" -ErrorAction SilentlyContinue
 
     # Start the background agent now.
