@@ -19,6 +19,9 @@ set "RC=%ERRORLEVEL%"
 echo.
 if "%RC%"=="0" (
     echo Done.
+) else if "%RC%"=="2" (
+    echo Setup saved. Restart PC Manager normally, without administrator rights.
+    echo Follow the instructions above before testing translation.
 ) else (
     echo Installation failed with exit code %RC%.
 )
