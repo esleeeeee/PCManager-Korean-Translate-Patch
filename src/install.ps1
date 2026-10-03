@@ -1,6 +1,31 @@
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
+function Assert-WebViewPolicyWritable {
+    # Check the closest existing parent without creating keys or changing ACLs.
+    # Some PCs protect HKCU\Software\Policies even for the current user.
+    $RelativePath = 'Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
+    while ($RelativePath) {
+        $ReadKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($RelativePath)
+        if ($null -ne $ReadKey) {
+            $ReadKey.Dispose()
+            try {
+                $WriteKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($RelativePath, $true)
+                if ($null -eq $WriteKey) { throw 'Registry key could not be opened for writing.' }
+                $WriteKey.Dispose()
+                return
+            }
+            catch {
+                throw 'The WebView2 policy is read-only for this account. No installation changes were made. Right-click install.bat and choose Run as administrator using the SAME Windows account, then run diagnose.bat. If this is an organization-managed PC, ask its administrator. Existing patch files and processes have been preserved.'
+            }
+        }
+        $Separator = $RelativePath.LastIndexOf('\')
+        if ($Separator -lt 0) { break }
+        $RelativePath = $RelativePath.Substring(0, $Separator)
+    }
+    throw 'Unable to check WebView2 policy permissions. No installation changes were made.'
+}
+
 function Show-Failure {
     param([string]$Message)
 
@@ -47,6 +72,9 @@ try {
         Show-Failure "MSPCManager.exe was not found in the Microsoft Store package."
     }
 
+    # Fail before stopping the working agent or replacing startup registrations.
+    Assert-WebViewPolicyWritable
+
     # Stop an existing installed agent if present.
     try {
         $OldPid = (Get-ItemProperty -LiteralPath $ConfigKey -Name "AgentPid" -ErrorAction SilentlyContinue).AgentPid
@@ -91,8 +119,8 @@ sh.Run cmd, 0, False
     Copy-Item -LiteralPath $LauncherPath -Destination $StartupLauncher -Force
 
     # Preserve any previous app-specific WebView2 arguments for clean uninstall.
-    New-Item -Path $ConfigKey -Force | Out-Null
-    New-Item -Path $WebViewKey -Force | Out-Null
+    if (-not (Test-Path -LiteralPath $ConfigKey)) { New-Item -Path $ConfigKey -Force | Out-Null }
+    if (-not (Test-Path -LiteralPath $WebViewKey)) { New-Item -Path $WebViewKey -Force | Out-Null }
 
     $HadPreviousArguments = $false
     $PreviousArguments = ""
@@ -107,19 +135,24 @@ sh.Run cmd, 0, False
     }
     catch {}
 
-    New-ItemProperty `
-        -Path $ConfigKey `
-        -Name "HadPreviousBrowserArguments" `
-        -PropertyType DWord `
-        -Value ([int]$HadPreviousArguments) `
-        -Force | Out-Null
+    # A repair install must retain the original uninstall backup, not replace it
+    # with the debugging arguments from an earlier installation.
+    $SavedConfig = Get-ItemProperty -LiteralPath $ConfigKey
+    if ($SavedConfig.PSObject.Properties.Name -notcontains 'HadPreviousBrowserArguments') {
+        New-ItemProperty `
+            -Path $ConfigKey `
+            -Name "HadPreviousBrowserArguments" `
+            -PropertyType DWord `
+            -Value ([int]$HadPreviousArguments) `
+            -Force | Out-Null
 
-    New-ItemProperty `
-        -Path $ConfigKey `
-        -Name "PreviousBrowserArguments" `
-        -PropertyType String `
-        -Value ([string]$PreviousArguments) `
-        -Force | Out-Null
+        New-ItemProperty `
+            -Path $ConfigKey `
+            -Name "PreviousBrowserArguments" `
+            -PropertyType String `
+            -Value ([string]$PreviousArguments) `
+            -Force | Out-Null
+    }
 
     $Arguments = [string]$PreviousArguments
     $Arguments = [regex]::Replace($Arguments, '(?i)--remote-debugging-port(?:=|\s+)\d+', '')
@@ -136,7 +169,7 @@ sh.Run cmd, 0, False
     # Register two user-level startup paths for reliability.
     $RunCommand = 'wscript.exe "' + $LauncherPath + '"'
 
-    New-Item -Path $RunKey -Force | Out-Null
+    if (-not (Test-Path -LiteralPath $RunKey)) { New-Item -Path $RunKey -Force | Out-Null }
     New-ItemProperty `
         -Path $RunKey `
         -Name "PCManagerKoPatchAgent" `

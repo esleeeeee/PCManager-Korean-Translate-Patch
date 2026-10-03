@@ -13,7 +13,7 @@ Microsoft PC Manager의 `Ctrl+Shift+A` Circle to Act 번역 기능이 첫 번역
 5. `Ctrl+Shift+A`로 텍스트를 선택한 뒤 번역을 눌러 첫 결과가 한국어인지 확인합니다.
 6. 설치가 끝난 뒤 다운로드하고 압축 해제한 폴더는 삭제해도 됩니다.
 
-설치 시 관리자 권한은 필요하지 않습니다.
+WebView2 사용자 정책을 수정할 수 있는 PC에서는 일반 권한으로 설치됩니다. 일부 PC는 `HKCU\Software\Policies`가 읽기 전용이라 관리자 권한이 필요합니다. 이 경우 설치기는 기존 파일·자동 실행·실행 중인 패치를 건드리기 전에 중단합니다. **같은 Windows 계정에서** `install.bat`을 우클릭 → **관리자 권한으로 실행**하세요. 조직에서 관리하는 PC는 관리자에게 문의하세요. 다른 관리자 계정으로 설치하면 그 계정에 적용되므로 피하세요.
 
 ## 제거
 
@@ -97,6 +97,10 @@ PC Manager 업데이트로 `SmartTranslateRequest`, Circle to Act의 WebView 구
 ```
 
 재부팅 후 작동하지 않으면 `agent.log`와 PC Manager 버전을 Issue에 첨부해 주세요.
+
+로그에 `agent-start`만 있고 `cdp-connected`가 없으면 번역 패치가 적용된 것이 아닙니다. 에이전트가 켜져 있다는 것과 PC Manager에 연결됐다는 것은 다릅니다. 특히 `Access to the registry key ... is denied`가 나오면 위의 권한 안내를 확인하세요.
+
+개발 검증: `node --test tests/translation.test.cjs`는 기본 한국어 지정과 명시적 언어 선택 보존을 검사합니다. 실제 화면 번역 확인은 별도로 필요합니다.
 
 ## 라이선스
 

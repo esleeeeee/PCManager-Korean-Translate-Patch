@@ -35,7 +35,7 @@ if (-not $CreatedNew) {
 }
 
 try {
-    New-Item -Path $ConfigKey -Force | Out-Null
+    if (-not (Test-Path -LiteralPath $ConfigKey)) { New-Item -Path $ConfigKey -Force | Out-Null }
     New-ItemProperty -Path $ConfigKey -Name "AgentPid" -PropertyType DWord -Value $PID -Force | Out-Null
     New-ItemProperty -Path $ConfigKey -Name "Status" -PropertyType String -Value "Running" -Force | Out-Null
     New-ItemProperty -Path $ConfigKey -Name "LastStart" -PropertyType String -Value (Get-Date).ToString("s") -Force | Out-Null
