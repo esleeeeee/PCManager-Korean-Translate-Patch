@@ -37,6 +37,8 @@ function Show-Failure {
 }
 
 try {
+    $IsElevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
     $Port = 9222
     $InstallRoot = Join-Path $env:LOCALAPPDATA "PCManagerKoPatch"
     $AgentSource = Join-Path $PSScriptRoot "agent.ps1"
@@ -75,19 +77,20 @@ try {
     # Fail before stopping the working agent or replacing startup registrations.
     Assert-WebViewPolicyWritable
 
-    # Stop an existing installed agent if present.
-    try {
-        $OldPid = (Get-ItemProperty -LiteralPath $ConfigKey -Name "AgentPid" -ErrorAction SilentlyContinue).AgentPid
-
-        if ($OldPid) {
-            $OldProcess = Get-Process -Id $OldPid -ErrorAction SilentlyContinue
-
-            if ($OldProcess -and $OldProcess.ProcessName -ieq "powershell") {
-                Stop-Process -Id $OldPid -Force -ErrorAction SilentlyContinue
+    # An elevated setup only installs configuration. Runtime processes must stay
+    # at normal user integrity: elevated WebView2 ignores these local flags.
+    if (-not $IsElevated) {
+        try {
+            $OldPid = (Get-ItemProperty -LiteralPath $ConfigKey -Name "AgentPid" -ErrorAction SilentlyContinue).AgentPid
+            if ($OldPid) {
+                $OldProcess = Get-Process -Id $OldPid -ErrorAction SilentlyContinue
+                if ($OldProcess -and $OldProcess.ProcessName -ieq "powershell") {
+                    Stop-Process -Id $OldPid -Force -ErrorAction SilentlyContinue
+                }
             }
         }
+        catch {}
     }
-    catch {}
 
     Start-Sleep -Milliseconds 250
 
@@ -179,6 +182,17 @@ sh.Run cmd, 0, False
 
     New-ItemProperty -Path $ConfigKey -Name "InstallVersion" -PropertyType String -Value "1.0.0" -Force | Out-Null
     New-ItemProperty -Path $ConfigKey -Name "InstallRoot" -PropertyType String -Value $InstallRoot -Force | Out-Null
+    if ($IsElevated) {
+        Write-Host ""
+        Write-Host "SETUP SAVED - NORMAL RESTART REQUIRED" -ForegroundColor Yellow
+        Write-Host "PC Manager has NOT been launched with administrator rights."
+        Write-Host "Close this installer, exit PC Manager from its tray menu, then reopen it normally."
+        Write-Host "From File Explorer, double-click: $LauncherPath"
+        Write-Host "Alternatively, sign out of Windows and sign back in to start both normally."
+        Write-Host "Then run diagnose.bat and test Ctrl+Shift+A translation."
+        Write-Host "Runtime connection and Korean translation have NOT yet been verified."
+        exit 2
+    }
     Remove-ItemProperty -Path $ConfigKey -Name "AgentPid" -ErrorAction SilentlyContinue
 
     # Start the background agent now.

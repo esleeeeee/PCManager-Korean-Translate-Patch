@@ -15,6 +15,8 @@ Microsoft PC Manager의 `Ctrl+Shift+A` Circle to Act 번역 기능이 첫 번역
 
 WebView2 사용자 정책을 수정할 수 있는 PC에서는 일반 권한으로 설치됩니다. 일부 PC는 `HKCU\Software\Policies`가 읽기 전용이라 관리자 권한이 필요합니다. 이 경우 설치기는 기존 파일·자동 실행·실행 중인 패치를 건드리기 전에 중단합니다. **같은 Windows 계정에서** `install.bat`을 우클릭 → **관리자 권한으로 실행**하세요. 조직에서 관리하는 PC는 관리자에게 문의하세요. 다른 관리자 계정으로 설치하면 그 계정에 적용되므로 피하세요.
 
+**관리자 설치 후:** `SETUP SAVED - NORMAL RESTART REQUIRED`는 설정 저장 완료이며 번역 검증 완료가 아닙니다. 설치창을 닫고 PC Manager를 트레이에서 완전히 종료한 뒤 시작 메뉴에서 **일반 실행**하세요. 파일 탐색기에서 `%LOCALAPPDATA%\PCManagerKoPatch\launch.vbs`도 더블클릭하세요. 또는 Windows에서 로그아웃 후 다시 로그인하세요. 설치기는 PC Manager를 관리자 권한으로 자동 실행하지 않습니다. [WebView2는 관리자 권한으로 실행한 앱에서 로컬 설정으로 지정한 연결 옵션을 무시하기 때문입니다.](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/webview-features-flags)
+
 ## 제거
 
 저장소를 다시 다운로드하거나 clone한 뒤 `uninstall.bat`을 더블클릭하면 됩니다.
